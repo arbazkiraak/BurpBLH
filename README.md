@@ -1,4 +1,4 @@
-About Broken Link Hijacking : https://edoverflow.com/2017/broken-link-hijacking/
+About Broken Link Hijacking : https://edoverflow.com/2017/broken-link-hijacking/ by @EdOverflow
 
 # BLH Plugin
 
