@@ -7,48 +7,39 @@ except:
 	import queue as queue
 from java.net import URL
 import urlparse
-from exceptions_fix import FixBurpExceptions
+from java.io import PrintWriter
+from java.lang import RuntimeException
 
 ## FOR URL BASED, Use below regex
 #REGEX = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+'
 
-## STOLE FROM LINKFINDER for both URL,PATH based
-regex_str = r"""
-  (?:"|')                               # Start newline delimiter
-  (
-	((?:[a-zA-Z]{1,10}://|//)           # Match a scheme [a-Z]*1-10 or //
-	[^"'/]{1,}\.                        # Match a domainname (any character + dot)
-	[a-zA-Z]{2,}[^"']{0,})              # The domainextension and/or path
-	|
-	((?:/|\.\./|\./)                    # Start with /,../,./
-	[^"'><,;| *()(%%$^/\\\[\]]          # Next character can't be...
-	[^"'><,;|()]{1,})                   # Rest of the characters can't be
-	|
-	([a-zA-Z0-9_\-/]{1,}/               # Relative endpoint with /
-	[a-zA-Z0-9_\-/]{1,}                 # Resource name
-	\.(?:[a-zA-Z]{1,4}|action)          # Rest + extension (length 1-4 or action)
-	(?:[\?|/][^"|']{0,}|))              # ? mark with parameters
-	|
-	([a-zA-Z0-9_\-]{1,}                 # filename
-	\.(?:php|asp|aspx|jsp|json|
-		 action|html|js|txt|xml)             # . + extension
-	(?:\?[^"|']{0,}|))                  # ? mark with parameters
-  )
-  (?:"|')                               # End newline delimiter
-"""
+## LINK BASED REGEX FOR HTML
+regex_str = r'(href|src|icon|data|url)=[\'"]?([^\'" >;]+)'
+
 
 WHITELIST_CODES = [200]
+WHITELIST_PATTERN = ["/","../","http","www"]
+WHITELIST_MEMES = ['HTML','Script','Other text','CSS','JSON']
 
 class BurpExtender(IBurpExtender,IScannerCheck):
 	extension_name = "Link Hijacking"
 	q = queue.Queue()
 	temp_urls = []
+	no_of_threads = 15
 	def registerExtenderCallbacks(self,callbacks):
-		self._callbacks = callbacks
-		self._helpers = callbacks.getHelpers()
-		self._callbacks.setExtensionName(self.extension_name)
-		callbacks.registerScannerCheck(self)
-
+		try:
+			self._callbacks = callbacks
+			self._helpers = callbacks.getHelpers()
+			self._callbacks.setExtensionName(self.extension_name)
+			self._stdout = PrintWriter(self._callbacks.getStdout(),True)
+			self._stderr = PrintWriter(self._callbacks.getStderr(),True)
+			callbacks.registerScannerCheck(self)
+			self._stdout.println("Extension Successfully Installed")
+			return
+		except Exception as e:
+			self._stderr.println("Installation Problem ?")
+			self._stderr.println(str(e))
+			return
 
 	def split(self,strng, sep, pos):
 		strng = strng.split(sep)
@@ -80,7 +71,7 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 			url = self.q.get()
 			furl = self._up_check(str(url))
 			if furl is not None:
-				print(furl)
+				#print(furl)
 				self.temp_urls.append(furl)
 
 	def _blf(self,baseRequestResponse,regex,host):
@@ -89,8 +80,9 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 		if len(re_r) == 0:
 			return
 		re_r = list(set([tuple(j for j in re_r if j)[-1] for re_r in re_r]))
-		re_r = [i.encode('utf-8').strip('') for i in re_r]
-		re_r = [i.replace('\\','/') for i in re_r]
+		re_r = list(set([i for i in re_r if i.startswith(tuple(WHITELIST_PATTERN))]))
+		#re_r = [i.encode('utf-8').strip('') for i in re_r if isinstance(i,bytes)]
+		#re_r = [i.replace('\\','/') for i in re_r]
 		final = []
 		for i in re_r:
 			if i.startswith('//') and ' ' not in i:
@@ -103,13 +95,16 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 				else:
 					i = str(host)+str(i)
 					final.append(i)
-			elif i.startswith('http') or i.startswith('www.') and ' ' not in i:
+			elif (i.startswith('http') or i.startswith('www.')) and ' ' not in i:
+				final.append(i)
+			elif i.startswith('../') and ' ' not in i:
+				i = str(host)+'/'+str(i)
 				final.append(i)
 		for url in final:
 			self.q.put(str(url))
 
 		threads = []
-		for i in range(10):
+		for i in range(int(BurpExtender.no_of_threads)):
 			t = threading.Thread(target=self.process_queue,args=(baseRequestResponse,))
 			threads.append(t)
 			t.start()
@@ -118,27 +113,27 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 			j.join()			
 		return True
 
+
 	def doPassiveScan(self,baseRequestResponse):
 		reqInfo = self._helpers.analyzeRequest(baseRequestResponse.getHttpService(),baseRequestResponse.getRequest())
-		if self._callbacks.isInScope(reqInfo.getUrl()):
+		if self._callbacks.isInScope(reqInfo.getUrl()) and str(self._helpers.analyzeResponse(baseRequestResponse.getResponse()).getInferredMimeType()) in WHITELIST_MEMES:
 			_HTTP = baseRequestResponse.getHttpService()
+			print('ON : ',str(reqInfo.getUrl()))
 			_host = str(_HTTP.getProtocol())+"://"+str(_HTTP.getHost())
 			regex = re.compile(regex_str,re.VERBOSE)
 			res = self._blf(baseRequestResponse,regex,_host)
 			if res and len(self.temp_urls) > 0:
 				final_urls = self.temp_urls[:]
-				print('final',final_urls)
 				self.temp_urls[:] = []
-				print('temp',self.temp_urls)
 				return [CustomScanIssue(baseRequestResponse.getHttpService(),self._helpers.analyzeRequest(baseRequestResponse).getUrl(),
 			[self._callbacks.applyMarkers(baseRequestResponse,None,None)],"Broken Link Hijacking",final_urls,"Low",_HTTP.getHost())]
 
 	def consolidateDuplicateIssues(self,existingIssue,newIssue):
-			if existingIssue.getIssueName() == newIssue.getIssueName():
-				return -1
+		return 1
 
-			return 0
-
+	def extensionUnloaded(self):
+		self._stdout.println("Extension was unloaded")
+		return
 
 class CustomScanIssue (IScanIssue):
 	def __init__(self, httpService, url, httpMessages, name, detail, severity, hostbased):
@@ -150,12 +145,6 @@ class CustomScanIssue (IScanIssue):
 		self._severity = severity
 		self._hostbased = hostbased
 
-		print(self._url)
-		print(self._httpService)
-		print(self._httpMessages)
-		print(self._name)
-		print(self._detail)
-		print(self._severity)
 
 	def getUrl(self):
 		return self._url
@@ -198,5 +187,3 @@ class CustomScanIssue (IScanIssue):
 
 	def getHttpService(self):
 		return self._httpService
-
-FixBurpExceptions()
