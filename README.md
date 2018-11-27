@@ -1,3 +1,5 @@
+About Broken Link Hijacking : https://edoverflow.com/2017/broken-link-hijacking/
+
 # BLH Plugin
 
 Burp Extension to discover broken links using IScannerCheck & synchronized threads.
