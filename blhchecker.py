@@ -129,7 +129,9 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 			[self._callbacks.applyMarkers(baseRequestResponse,None,None)],"Broken Link Hijacking",final_urls,"Low",_HTTP.getHost())]
 
 	def consolidateDuplicateIssues(self,existingIssue,newIssue):
-		return 1
+		if existingIssue.getIssueName() == newIssue.getIssueName():
+			return -1
+		return 0
 
 	def extensionUnloaded(self):
 		self._stdout.println("Extension was unloaded")
