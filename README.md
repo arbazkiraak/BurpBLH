@@ -43,6 +43,11 @@ ex: Mainly used to avoid performing regexes in `gif,img,jpg,swf etc`
 
 # Output
 
+* Resolves the links from the responses and add the issue with `Medium` severity if they get failed to resolved.
+
+![1](https://user-images.githubusercontent.com/13177578/64844040-4b2e4100-d624-11e9-88b6-49a3f7fbe20b.PNG)
+
+
 - 2 Ways it outputs the broken links.
 1. Broken Links which belongs to external origins.
 2. Broken Links which belongs to same origins.
