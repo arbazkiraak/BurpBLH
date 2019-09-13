@@ -1,6 +1,6 @@
 from burp import IBurpExtender,IScannerCheck,IScanIssue,IHttpService
 from array import array
-import re,threading
+import re,threading,requests
 try:
 	import Queue as queue
 except:
@@ -25,6 +25,7 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 	extension_name = "Link Hijacking"
 	q = queue.Queue()
 	temp_urls = []
+	down_urls = []
 	no_of_threads = 15
 	def registerExtenderCallbacks(self,callbacks):
 		try:
@@ -45,6 +46,18 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 		strng = strng.split(sep)
 		return sep.join(strng[:pos]), sep.join(strng[pos:])
 
+	def Resolver(self,url):
+		try:
+			r = requests.get(url,verify=False)
+			return "UP"
+		except requests.exceptions.ConnectionError,e:
+			if 'getaddrinfo failed' in str(e):
+				return "DOWN"
+			else:
+				return "UP"
+		except Exception as e:
+			return "UP"
+
 
 	def _up_check(self,url):
 			parse_object = urlparse.urlparse(url)
@@ -56,13 +69,17 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 				port = 80
 				SSL = False
 			try:
-				req_bytes = self._helpers.buildHttpRequest(URL(str(url)))
-				res_bytes = self._callbacks.makeHttpRequest(hostname,port,SSL,req_bytes)
-				res = self._helpers.analyzeResponse(res_bytes)
-				if res.getStatusCode() not in WHITELIST_CODES:
-					return url
-			except Exception as e:
-				print(e)
+				check_status = self.Resolver(str(url))
+				if check_status == "UP":
+					req_bytes = self._helpers.buildHttpRequest(URL(str(url)))
+					res_bytes = self._callbacks.makeHttpRequest(hostname,port,SSL,req_bytes)
+					res = self._helpers.analyzeResponse(res_bytes)
+					if res.getStatusCode() not in WHITELIST_CODES:
+						return url
+				if check_status == "DOWN":
+					self.down_urls.append(str(url))
+					return None
+			except:
 				print('SKIPPING : ',url)
 				return None
 
@@ -122,11 +139,21 @@ class BurpExtender(IBurpExtender,IScannerCheck):
 			_host = str(_HTTP.getProtocol())+"://"+str(_HTTP.getHost())
 			regex = re.compile(regex_str,re.VERBOSE)
 			res = self._blf(baseRequestResponse,regex,_host)
+
+			if res and len(self.down_urls) > 0:
+				final_down_urls = self.down_urls[:]
+				self.down_urls[:] = []
+				final_down_urls = list(set(final_down_urls))
+				return [CustomScanIssue(baseRequestResponse.getHttpService(),self._helpers.analyzeRequest(baseRequestResponse).getUrl(),
+			[self._callbacks.applyMarkers(baseRequestResponse,None,None)],"Broken Link Hijacking",final_down_urls,"Medium",_HTTP.getHost())]
+
 			if res and len(self.temp_urls) > 0:
 				final_urls = self.temp_urls[:]
 				self.temp_urls[:] = []
+				final_urls = list(set(final_urls))
 				return [CustomScanIssue(baseRequestResponse.getHttpService(),self._helpers.analyzeRequest(baseRequestResponse).getUrl(),
-			[self._callbacks.applyMarkers(baseRequestResponse,None,None)],"Broken Link Hijacking",final_urls,"Low",_HTTP.getHost())]
+			[self._callbacks.applyMarkers(baseRequestResponse,None,None)],"Broken Link Hijacking",final_urls,"Information",_HTTP.getHost())]		
+		
 
 	def consolidateDuplicateIssues(self,existingIssue,newIssue):
 		if existingIssue.getIssueName() == newIssue.getIssueName():
@@ -146,7 +173,6 @@ class CustomScanIssue (IScanIssue):
 		self._detail = detail
 		self._severity = severity
 		self._hostbased = hostbased
-
 
 	def getUrl(self):
 		return self._url
